@@ -34,13 +34,22 @@ If two requests arrive simultaneously:
 
 ### 4. The State Machine
 **Transition Blocking:**
-Failed-to-completed (and other illegal transitions) are blocked in the Celery task logic:
+Illegal transitions (e.g., `FAILED -> COMPLETED`) are blocked at the **model level** using a `transition_to` method that enforces a strict state machine:
+
 ```python
-# State Machine Validation
-if payout.status not in ['PENDING', 'PROCESSING']:
-    return f"Illegal transition from {payout.status}"
+def transition_to(self, new_status):
+    legal_transitions = {
+        'PENDING': ['PROCESSING', 'FAILED'],
+        'PROCESSING': ['COMPLETED', 'FAILED'],
+        'COMPLETED': [],
+        'FAILED': [],
+    }
+    if new_status not in legal_transitions.get(self.status, []):
+        raise ValueError(f"Illegal transition from {self.status} to {new_status}")
+    self.status = new_status
+    self.save()
 ```
-This check ensures that once a payout reaches a terminal state (`COMPLETED` or `FAILED`), it can never be moved back into a processing state, preventing double-payouts or double-refunds.
+This ensures that even if a developer (or AI) attempts to bypass the logic in a background task or view, the database state remains consistent and the lifecycle is strictly followed.
 
 ### 5. The AI Audit
 **The Mistake:**

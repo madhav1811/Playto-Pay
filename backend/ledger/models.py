@@ -44,6 +44,28 @@ class Payout(models.Model):
     def __str__(self):
         return f"Payout {self.id} - {self.status}"
 
+    def transition_to(self, new_status):
+        """
+        Enforce state machine transitions.
+        Legal: 
+        - PENDING -> PROCESSING
+        - PROCESSING -> COMPLETED
+        - PROCESSING -> FAILED
+        - PENDING -> FAILED (Direct failure)
+        """
+        legal_transitions = {
+            'PENDING': ['PROCESSING', 'FAILED'],
+            'PROCESSING': ['COMPLETED', 'FAILED'],
+            'COMPLETED': [],
+            'FAILED': [],
+        }
+        
+        if new_status not in legal_transitions.get(self.status, []):
+            raise ValueError(f"Illegal transition from {self.status} to {new_status}")
+            
+        self.status = new_status
+        self.save()
+
 class Transaction(models.Model):
     TRANSACTION_TYPE_CHOICES = [
         ('CREDIT', 'Credit'),

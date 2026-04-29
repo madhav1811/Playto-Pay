@@ -18,8 +18,10 @@ def process_payout(self, payout_id):
 
     # Increment attempts
     payout.attempts += 1
-    payout.status = 'PROCESSING'
-    payout.save()
+    try:
+        payout.transition_to('PROCESSING')
+    except ValueError as e:
+        return str(e)
 
     # Simulate bank settlement delay
     time.sleep(1)
@@ -37,13 +39,11 @@ def process_payout(self, payout_id):
 
         if roll < 0.70:
             # 70% Success
-            payout.status = 'COMPLETED'
-            payout.save()
+            payout.transition_to('COMPLETED')
             return "Payout Completed"
         elif roll < 0.90:
             # 20% Failure
-            payout.status = 'FAILED'
-            payout.save()
+            payout.transition_to('FAILED')
             
             # Atomic refund
             Transaction.objects.create(
@@ -58,8 +58,7 @@ def process_payout(self, payout_id):
             # 10% Stuck / Retry
             if payout.attempts >= 3:
                 # Max attempts reached, fail and refund
-                payout.status = 'FAILED'
-                payout.save()
+                payout.transition_to('FAILED')
                 Transaction.objects.create(
                     merchant=payout.merchant,
                     amount=payout.amount,
