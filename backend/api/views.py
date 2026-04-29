@@ -8,24 +8,30 @@ import uuid
 class PayoutCreateView(views.APIView):
     def post(self, request):
         merchant_id = request.data.get('merchant_id')
-        amount = request.data.get('amount')
+        amount_paise = request.data.get('amount_paise')
+        bank_account_id = request.data.get('bank_account_id')
         idem_key = request.headers.get('X-Idempotency-Key')
 
         if not idem_key:
             return response.Response({"error": "X-Idempotency-Key header is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not merchant_id or not amount:
-            return response.Response({"error": "merchant_id and amount are required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not merchant_id or not amount_paise or not bank_account_id:
+            return response.Response({"error": "merchant_id, amount_paise, and bank_account_id are required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            amount = int(amount)
+            amount = int(amount_paise)
         except (ValueError, TypeError):
-            return response.Response({"error": "amount must be an integer (paise)"}, status=status.HTTP_400_BAD_REQUEST)
+            return response.Response({"error": "amount_paise must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Check for existing idempotency key
+        from django.utils import timezone
         try:
             cached_res = IdempotencyKey.objects.get(key=idem_key)
-            return response.Response(cached_res.response_body, status=cached_res.response_code)
+            # Check if key is expired (24h)
+            if cached_res.created_at < timezone.now() - timezone.timedelta(hours=24):
+                cached_res.delete()
+            else:
+                return response.Response(cached_res.response_body, status=cached_res.response_code)
         except IdempotencyKey.DoesNotExist:
             pass
 
@@ -49,6 +55,7 @@ class PayoutCreateView(views.APIView):
                 payout = Payout.objects.create(
                     merchant=merchant,
                     amount=amount,
+                    bank_account_id=bank_account_id,
                     idempotency_key=idem_key,
                     status='PENDING'
                 )
@@ -99,7 +106,8 @@ class DashboardView(views.APIView):
                 "merchant": MerchantSerializer(merchant).data,
                 "recent_payouts": PayoutSerializer(payouts, many=True).data,
                 "recent_transactions": TransactionSerializer(transactions, many=True).data,
-                "balance": merchant.balance
+                "balance": merchant.balance,
+                "held_balance": merchant.held_balance
             })
         except Merchant.DoesNotExist:
             return response.Response({"error": "Merchant not found"}, status=status.HTTP_404_NOT_FOUND)

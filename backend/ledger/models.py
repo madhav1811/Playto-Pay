@@ -17,6 +17,11 @@ class Merchant(models.Model):
         debits = self.transactions.filter(transaction_type='DEBIT').aggregate(total=Sum('amount'))['total'] or 0
         return credits - debits
 
+    @property
+    def held_balance(self):
+        # Sum of PENDING or PROCESSING payouts
+        return self.payouts.filter(status__in=['PENDING', 'PROCESSING']).aggregate(total=Sum('amount'))['total'] or 0
+
 class Payout(models.Model):
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
@@ -27,7 +32,9 @@ class Payout(models.Model):
     merchant = models.ForeignKey(Merchant, on_delete=models.CASCADE, related_name='payouts')
     amount = models.BigIntegerField(validators=[MinValueValidator(1)]) # in paise
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    bank_account_id = models.CharField(max_length=255, null=True, blank=True)
     idempotency_key = models.UUIDField(db_index=True)
+    attempts = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
