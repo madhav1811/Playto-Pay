@@ -23,23 +23,24 @@ class PayoutCreateView(views.APIView):
         except (ValueError, TypeError):
             return response.Response({"error": "amount_paise must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check for existing idempotency key
-        from django.utils import timezone
-        try:
-            cached_res = IdempotencyKey.objects.get(key=idem_key)
-            # Check if key is expired (24h)
-            if cached_res.created_at < timezone.now() - timezone.timedelta(hours=24):
-                cached_res.delete()
-            else:
-                return response.Response(cached_res.response_body, status=cached_res.response_code)
-        except IdempotencyKey.DoesNotExist:
-            pass
+        # Idempotency check moved inside transaction lock to handle race conditions
 
         try:
             with transaction.atomic():
-                # Lock the merchant for balance check
+                # Lock the merchant for balance check AND idempotency
                 merchant = Merchant.objects.select_for_update().get(id=merchant_id)
                 
+                # Check for existing idempotency key INSIDE the lock
+                try:
+                    cached_res = IdempotencyKey.objects.get(key=idem_key)
+                    # Check if key is expired (24h)
+                    if cached_res.created_at < timezone.now() - timezone.timedelta(hours=24):
+                        cached_res.delete()
+                    else:
+                        return response.Response(cached_res.response_body, status=cached_res.response_code)
+                except IdempotencyKey.DoesNotExist:
+                    pass
+
                 if merchant.balance < amount:
                     error_res = {"error": "Insufficient balance"}
                     # We store error responses too for idempotency
